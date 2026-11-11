@@ -1,0 +1,86 @@
+name: Release charms
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  list:
+    name: List charms
+    runs-on: ubuntu-latest
+    outputs:
+      charms: ${{ steps.list.outputs.charms }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: List charm directories
+        id: list
+        run: |
+          charms="$(
+            git ls-files 'charms/*/charmcraft.yaml' \
+              | while read -r file; do
+                  if grep -q '^parts:' "$file"; then
+                    printf '%s\n' "${file%/charmcraft.yaml}"
+                  fi
+                done \
+              | jq -R -s -c '
+                  split("\n")
+                  | map(select(. != ""))
+                  | map({name: (split("/") | join("-")), path: .})
+                '
+          )"
+          echo "charms=$charms" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.charm.name }}
+    needs: list
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        charm: ${{ fromJSON(needs.list.outputs.charms) }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up LXD
+        uses: canonical/setup-lxd@v1
+        with:
+          channel: latest/stable
+
+      - name: Install charmcraft
+        run: sudo snap install charmcraft --classic
+
+      - name: Pack charm
+        working-directory: ${{ matrix.charm.path }}
+        run: charmcraft pack --platform amd64 -v
+
+      - name: Upload charm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.charm.name }}
+          path: ${{ matrix.charm.path }}/*.charm
+          if-no-files-found: error
+
+  release:
+    name: Attach charms to release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download charm artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Attach charms to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "${{ github.event.release.tag_name }}"
+          dist/*.charm --clobber
