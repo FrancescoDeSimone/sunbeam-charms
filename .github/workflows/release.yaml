@@ -46,6 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         charm: ${{ fromJSON(needs.list.outputs.charms) }}
     steps:
@@ -53,16 +54,41 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up LXD
-        uses: canonical/setup-lxd@v1
-        with:
-          channel: latest/stable
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if sudo snap install lxd; then
+              installed=1
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          if [ "${installed:-}" != 1 ]; then
+            echo "failed to install LXD" >&2
+            exit 1
+          fi
+          sudo snap set lxd daemon.group=lxd
+          sudo usermod -aG lxd "$USER"
+          sudo lxd waitready
+          sudo lxd init --auto
+          sudo lxc config set images.compression_algorithm none
 
       - name: Install charmcraft
-        run: sudo snap install charmcraft --classic
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if sudo snap install charmcraft --classic; then
+              installed=1
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+          if [ "${installed:-}" != 1 ]; then
+            echo "failed to install charmcraft" >&2
+            exit 1
+          fi
 
       - name: Pack charm
         working-directory: ${{ matrix.charm.path }}
-        run: charmcraft pack --platform amd64 -v
+        run: sg lxd -c "charmcraft pack --platform amd64 -v"
 
       - name: Upload charm artifact
         uses: actions/upload-artifact@v4
