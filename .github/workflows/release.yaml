@@ -1,9 +1,13 @@
 name: Release charms
 
 on:
+  push:
+    branches:
+      - dev
   release:
     types:
       - published
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -70,6 +74,7 @@ jobs:
   release:
     name: Attach charms to release
     needs: build
+    if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - name: Download charm artifacts
