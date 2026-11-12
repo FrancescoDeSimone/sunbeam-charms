@@ -15,6 +15,7 @@ permissions:
 jobs:
   list:
     name: List charms
+    if: github.event_name != 'release' || github.event.release.tag_name != 'dev-latest'
     runs-on: ubuntu-latest
     outputs:
       charms: ${{ steps.list.outputs.charms }}
@@ -43,6 +44,7 @@ jobs:
   build:
     name: ${{ matrix.charm.name }}
     needs: list
+    if: github.event_name != 'release' || github.event.release.tag_name != 'dev-latest'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -116,7 +118,7 @@ jobs:
   release:
     name: Attach charms to release
     needs: build
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && github.event.release.tag_name != 'dev-latest'
     runs-on: ubuntu-latest
     steps:
       - name: Download charm artifacts
@@ -131,3 +133,24 @@ jobs:
         run: >-
           gh release upload "${{ github.event.release.tag_name }}"
           dist/*.charm --clobber
+
+  dev-release:
+    name: Attach charms to dev release
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download charm artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish dev release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view dev-latest >/dev/null 2>&1 || \
+            gh release create dev-latest --target "$GITHUB_SHA" --prerelease \
+              --title "Dev build" --notes "Latest build from dev"
+          gh release upload dev-latest dist/*.charm --clobber
