@@ -96,7 +96,15 @@ jobs:
 
       - name: Pack charm
         working-directory: ${{ matrix.charm.path }}
-        run: sg lxd -c "charmcraft pack --platform amd64 -v"
+        run: |
+          for attempt in 1 2 3; do
+            if sg lxd -c "charmcraft pack --platform amd64 -v"; then
+              exit 0
+            fi
+            sg lxd -c "charmcraft clean" || true
+            sleep 30
+          done
+          exit 1
 
       - name: Upload charm artifact
         uses: actions/upload-artifact@v4
